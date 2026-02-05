@@ -10,6 +10,7 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 import Landing from "./pages/Landing";
 import Login from "./pages/Login";
 import RecoverPassword from "./pages/RecoverPassword";
+import Install from "./pages/Install";
 import NotFound from "./pages/NotFound";
 
 // Protected pages
@@ -35,6 +36,7 @@ const App = () => (
             <Route path="/" element={<Landing />} />
             <Route path="/login" element={<Login />} />
             <Route path="/recuperar-password" element={<RecoverPassword />} />
+            <Route path="/instalar" element={<Install />} />
 
             {/* Protected routes */}
             <Route
