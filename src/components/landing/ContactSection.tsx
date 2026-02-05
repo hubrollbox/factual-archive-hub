@@ -61,21 +61,21 @@ export function ContactSection() {
   };
 
   return (
-    <section id="contacto" className="py-16 lg:py-24 bg-background">
-      <div className="container">
+    <section id="contacto" className="py-12 sm:py-16 lg:py-24 bg-background">
+      <div className="container px-4 sm:px-6">
         <div className="mx-auto max-w-2xl">
-          <div className="text-center mb-10">
-            <h2 className="font-display text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
+          <div className="text-center mb-8 sm:mb-10">
+            <h2 className="font-display text-2xl font-bold tracking-tight text-foreground sm:text-3xl lg:text-4xl">
               Contacto
             </h2>
-            <p className="mt-4 text-muted-foreground">
+            <p className="mt-3 text-sm text-muted-foreground sm:mt-4 sm:text-base">
               Para solicitar os nossos serviços ou esclarecer dúvidas, 
               utilize o formulário abaixo.
             </p>
           </div>
           
-          <div className="rounded-lg border border-border bg-card p-6 shadow-soft-md">
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <div className="rounded-lg border border-border bg-card p-4 shadow-soft-md sm:p-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4 sm:space-y-5">
               <div className="grid gap-5 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="name">Nome *</Label>
