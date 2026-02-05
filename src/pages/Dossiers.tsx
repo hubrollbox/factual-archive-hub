@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -15,6 +15,7 @@ import { Plus, FolderOpen, Loader2, Search } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 type DossierStatus = 'em_analise' | 'pendente' | 'completo' | 'arquivado';
+type DossierCategory = 'consumo' | 'telecomunicacoes' | 'transito' | 'fiscal' | 'trabalho' | 'outros';
 
 interface Dossier {
   id: string;
@@ -23,6 +24,7 @@ interface Dossier {
   client_name: string | null;
   reference_code: string | null;
   status: DossierStatus;
+  category: DossierCategory;
   created_at: string;
   updated_at: string;
 }
@@ -32,6 +34,15 @@ const statusLabels: Record<DossierStatus, string> = {
   pendente: 'Pendente',
   completo: 'Completo',
   arquivado: 'Arquivado',
+};
+
+const categoryLabels: Record<DossierCategory, string> = {
+  consumo: 'Consumo',
+  telecomunicacoes: 'Telecomunicações',
+  transito: 'Trânsito',
+  fiscal: 'Fiscal',
+  trabalho: 'Trabalho',
+  outros: 'Outros',
 };
 
 const statusColors: Record<DossierStatus, string> = {
@@ -54,8 +65,9 @@ export default function Dossiers() {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    client_name: '',
+    entity: '',
     reference_code: '',
+    category: 'outros' as DossierCategory,
   });
 
   useEffect(() => {
@@ -73,7 +85,7 @@ export default function Dossiers() {
         .order('updated_at', { ascending: false });
 
       if (error) throw error;
-      setDossiers(data || []);
+      setDossiers((data || []) as Dossier[]);
     } catch (error) {
       console.error('Error fetching dossiers:', error);
       toast({
@@ -96,8 +108,9 @@ export default function Dossiers() {
         user_id: user.id,
         title: formData.title,
         description: formData.description || null,
-        client_name: formData.client_name || null,
+        client_name: formData.entity || null,
         reference_code: formData.reference_code || null,
+        category: formData.category,
       });
 
       if (error) throw error;
@@ -107,7 +120,7 @@ export default function Dossiers() {
         description: 'O dossiê foi criado com sucesso.',
       });
 
-      setFormData({ title: '', description: '', client_name: '', reference_code: '' });
+      setFormData({ title: '', description: '', entity: '', reference_code: '', category: 'outros' });
       setIsDialogOpen(false);
       fetchDossiers();
     } catch (error) {
@@ -153,7 +166,7 @@ export default function Dossiers() {
                 Novo Dossiê
               </Button>
             </DialogTrigger>
-            <DialogContent>
+            <DialogContent className="max-h-[90vh] overflow-y-auto">
               <DialogHeader>
                 <DialogTitle>Criar Novo Dossiê</DialogTitle>
                 <DialogDescription>
@@ -162,44 +175,76 @@ export default function Dossiers() {
               </DialogHeader>
               <form onSubmit={handleCreateDossier} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="title">Título *</Label>
+                  <Label htmlFor="title">Título do Dossiê *</Label>
                   <Input
                     id="title"
                     value={formData.title}
                     onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                    placeholder="Nome do dossiê"
+                    placeholder="Ex.: Vodafone – Fatura indevida Jan 2025"
                     required
                   />
+                  <p className="text-xs text-muted-foreground">Curto e factual</p>
                 </div>
+                
                 <div className="space-y-2">
-                  <Label htmlFor="client_name">Nome do Cliente</Label>
-                  <Input
-                    id="client_name"
-                    value={formData.client_name}
-                    onChange={(e) => setFormData({ ...formData, client_name: e.target.value })}
-                    placeholder="Nome do cliente (opcional)"
-                  />
+                  <Label htmlFor="category">Categoria *</Label>
+                  <Select 
+                    value={formData.category} 
+                    onValueChange={(value: DossierCategory) => setFormData({ ...formData, category: value })}
+                  >
+                    <SelectTrigger id="category">
+                      <SelectValue placeholder="Selecionar categoria" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="consumo">Consumo</SelectItem>
+                      <SelectItem value="telecomunicacoes">Telecomunicações</SelectItem>
+                      <SelectItem value="transito">Trânsito</SelectItem>
+                      <SelectItem value="fiscal">Fiscal</SelectItem>
+                      <SelectItem value="trabalho">Trabalho</SelectItem>
+                      <SelectItem value="outros">Outros</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="reference_code">Código de Referência</Label>
-                  <Input
-                    id="reference_code"
-                    value={formData.reference_code}
-                    onChange={(e) => setFormData({ ...formData, reference_code: e.target.value })}
-                    placeholder="Ex: DOS-2024-001"
-                  />
+
+                <div className="border-t pt-4">
+                  <p className="text-sm font-medium text-muted-foreground mb-3">Campos opcionais</p>
+                  
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="entity">Entidade Principal</Label>
+                      <Input
+                        id="entity"
+                        value={formData.entity}
+                        onChange={(e) => setFormData({ ...formData, entity: e.target.value })}
+                        placeholder="Ex.: Vodafone, ANSR, AT, Câmara X"
+                      />
+                      <p className="text-xs text-muted-foreground">Para filtrar e agrupar depois</p>
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="reference_code">Código de Referência / Processo</Label>
+                      <Input
+                        id="reference_code"
+                        value={formData.reference_code}
+                        onChange={(e) => setFormData({ ...formData, reference_code: e.target.value })}
+                        placeholder="Ex.: nº cliente, nº auto, nº processo"
+                      />
+                    </div>
+                    
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Descrição Livre</Label>
+                      <Textarea
+                        id="description"
+                        value={formData.description}
+                        onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                        placeholder="Texto cru, sem regras. Ex.: Cobrança após cancelamento. Liguei 3 vezes. Disseram que iam corrigir."
+                        rows={4}
+                      />
+                    </div>
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="description">Descrição</Label>
-                  <Textarea
-                    id="description"
-                    value={formData.description}
-                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                    placeholder="Descrição do dossiê"
-                    rows={3}
-                  />
-                </div>
-                <div className="flex justify-end gap-2">
+
+                <div className="flex justify-end gap-2 pt-2">
                   <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>
                     Cancelar
                   </Button>
@@ -262,23 +307,30 @@ export default function Dossiers() {
                 <Card className="h-full transition-shadow hover:shadow-soft-lg">
                   <CardHeader className="pb-2">
                     <div className="flex items-start justify-between gap-2">
-                      <CardTitle className="text-base font-semibold line-clamp-1">
-                        {dossier.title}
-                      </CardTitle>
+                      <div className="flex-1 min-w-0">
+                        <CardTitle className="text-base font-semibold line-clamp-1">
+                          {dossier.title}
+                        </CardTitle>
+                        <div className="flex items-center gap-2 mt-1">
+                          <Badge variant="secondary" className="text-xs">
+                            {categoryLabels[dossier.category] || 'Outros'}
+                          </Badge>
+                          {dossier.reference_code && (
+                            <span className="text-xs text-muted-foreground">
+                              Ref: {dossier.reference_code}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                       <Badge variant="outline" className={statusColors[dossier.status]}>
                         {statusLabels[dossier.status]}
                       </Badge>
                     </div>
-                    {dossier.reference_code && (
-                      <CardDescription className="text-xs">
-                        Ref: {dossier.reference_code}
-                      </CardDescription>
-                    )}
                   </CardHeader>
                   <CardContent>
                     {dossier.client_name && (
                       <p className="text-sm text-muted-foreground">
-                        Cliente: {dossier.client_name}
+                        Entidade: {dossier.client_name}
                       </p>
                     )}
                     {dossier.description && (
@@ -287,7 +339,7 @@ export default function Dossiers() {
                       </p>
                     )}
                     <p className="mt-3 text-xs text-muted-foreground">
-                      Actualizado: {new Date(dossier.updated_at).toLocaleDateString('pt-PT')}
+                      Aberto: {new Date(dossier.created_at).toLocaleDateString('pt-PT')}
                     </p>
                   </CardContent>
                 </Card>
