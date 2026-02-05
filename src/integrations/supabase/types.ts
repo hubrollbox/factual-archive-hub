@@ -98,6 +98,24 @@ export type Database = {
         }
         Relationships: []
       }
+      contact_rate_limits: {
+        Row: {
+          ip_hash: string
+          submission_count: number
+          window_start: string
+        }
+        Insert: {
+          ip_hash: string
+          submission_count?: number
+          window_start?: string
+        }
+        Update: {
+          ip_hash?: string
+          submission_count?: number
+          window_start?: string
+        }
+        Relationships: []
+      }
       documents: {
         Row: {
           created_at: string
@@ -279,6 +297,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      check_and_increment_contact_rate_limit: { Args: never; Returns: boolean }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
