@@ -1,5 +1,6 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useReactToPrint } from 'react-to-print';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
@@ -7,7 +8,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { FileBarChart, Loader2, AlertTriangle, CheckCircle2, FileText, FileDown, ArrowUpDown } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { FileBarChart, Loader2, AlertTriangle, CheckCircle2, FileText, FileDown, ArrowUpDown, RefreshCw } from 'lucide-react';
 import { ReportsCharts } from '@/components/reports/ReportsCharts';
 import { ReportsPrintView } from '@/components/reports/ReportsPrintView';
 
@@ -46,101 +48,93 @@ export default function Reports() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const printRef = useRef<HTMLDivElement>(null);
+  const handlePrint = useReactToPrint({
+    content: () => printRef.current,
+    documentTitle: 'Relatórios de Dossiês',
+  });
   const [dossiers, setDossiers] = useState<Dossier[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [sortBy, setSortBy] = useState<SortOption>('updated_at');
 
   useEffect(() => {
-    fetchReportData();
+    if (user) {
+      fetchReportData();
+    }
   }, [user]);
 
   async function fetchReportData() {
-    if (!user) return;
+    setLoading(true);
+    setError(null);
 
     try {
-      // Fetch dossiers with document and chronology counts
       const { data: dossiersData, error: dossiersError } = await supabase
         .from('dossiers')
-        .select('id, title, status, client_name, category')
-        .eq('user_id', user.id)
+        .select(`
+          id, title, status, client_name, category,
+          document_count:documents(count),
+          chronology_count:chronology_entries(count)
+        `)
+        .eq('user_id', user!.id)
         .order('updated_at', { ascending: false });
 
       if (dossiersError) throw dossiersError;
 
-      // Fetch document counts
-      const { data: documentsData } = await supabase
-        .from('documents')
-        .select('dossier_id')
-        .eq('user_id', user.id);
-
-      // Fetch chronology counts
-      const { data: chronologyData } = await supabase
-        .from('chronology_entries')
-        .select('dossier_id')
-        .eq('user_id', user.id);
-
-      // Build report data
-      const reportData: Dossier[] = (dossiersData || []).map((d) => {
-        const docCount = documentsData?.filter(doc => doc.dossier_id === d.id).length || 0;
-        const chronoCount = chronologyData?.filter(c => c.dossier_id === d.id).length || 0;
-        
-        return {
-          ...d,
-          document_count: docCount,
-          chronology_count: chronoCount,
-          has_gaps: docCount === 0 || chronoCount === 0,
-        };
-      });
+      const reportData: Dossier[] = (dossiersData || []).map((d: any) => ({
+        ...d,
+        document_count: d.document_count[0]?.count || 0,
+        chronology_count: d.chronology_count[0]?.count || 0,
+        has_gaps: d.document_count[0]?.count === 0 || d.chronology_count[0]?.count === 0,
+      }));
 
       setDossiers(reportData);
-    } catch (error) {
-      console.error('Error fetching report data:', error);
+    } catch (err) {
+      console.error('Error fetching report data:', err);
+      setError('Ocorreu um erro ao carregar os dados. Por favor, tente novamente.');
     } finally {
       setLoading(false);
     }
   }
 
-  function handleExportPDF() {
-    window.print();
-  }
+  // Memoize filtered and sorted dossiers
+  const filteredDossiers = useMemo(() => {
+    let result = [...dossiers];
 
-  // Apply filters
-  let filteredDossiers = dossiers;
-
-  if (filterStatus !== 'all') {
-    if (filterStatus === 'with_gaps') {
-      filteredDossiers = filteredDossiers.filter(d => d.has_gaps);
-    } else {
-      filteredDossiers = filteredDossiers.filter(d => d.status === filterStatus);
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'with_gaps') {
+        result = result.filter(d => d.has_gaps);
+      } else {
+        result = result.filter(d => d.status === filterStatus);
+      }
     }
-  }
 
-  if (filterCategory !== 'all') {
-    filteredDossiers = filteredDossiers.filter(d => (d.category || 'outros') === filterCategory);
-  }
-
-  // Apply sorting
-  filteredDossiers = [...filteredDossiers].sort((a, b) => {
-    switch (sortBy) {
-      case 'title':
-        return a.title.localeCompare(b.title);
-      case 'document_count':
-        return b.document_count - a.document_count;
-      case 'chronology_count':
-        return b.chronology_count - a.chronology_count;
-      default:
-        return 0; // Keep original order (updated_at from query)
+    if (filterCategory !== 'all') {
+      result = result.filter(d => (d.category || 'outros') === filterCategory);
     }
-  });
 
-  const stats = {
+    return result.sort((a, b) => {
+      switch (sortBy) {
+        case 'title':
+          return a.title.localeCompare(b.title);
+        case 'document_count':
+          return b.document_count - a.document_count;
+        case 'chronology_count':
+          return b.chronology_count - a.chronology_count;
+        default:
+          return 0; // Maintain original updated_at order
+      }
+    });
+  }, [dossiers, filterStatus, filterCategory, sortBy]);
+
+  // Memoize stats
+  const stats = useMemo(() => ({
     total: dossiers.length,
     withGaps: dossiers.filter(d => d.has_gaps).length,
     complete: dossiers.filter(d => d.status === 'completo').length,
     pending: dossiers.filter(d => d.status === 'pendente' || d.status === 'em_analise').length,
-  };
+  }), [dossiers]);
 
   return (
     <DashboardLayout>
@@ -155,14 +149,28 @@ export default function Reports() {
             </p>
           </div>
           
-          <Button variant="outline" className="gap-2" onClick={handleExportPDF}>
+          <Button variant="outline" className="gap-2" onClick={handlePrint}>
             <FileDown className="h-4 w-4" />
             <span className="hidden sm:inline">Exportar PDF</span>
           </Button>
         </div>
 
+        {error && (
+          <Alert variant="destructive" className="print:hidden">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Erro</AlertTitle>
+            <AlertDescription className="flex items-center justify-between">
+              {error}
+              <Button variant="ghost" size="sm" onClick={fetchReportData}>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Tentar novamente
+              </Button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Summary stats */}
-        {!loading && (
+        {!loading && !error && (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 print:hidden">
             <Card>
               <CardHeader className="pb-2">
@@ -192,7 +200,7 @@ export default function Reports() {
         )}
 
         {/* Charts */}
-        {!loading && <ReportsCharts dossiers={dossiers} />}
+        {!loading && !error && <ReportsCharts dossiers={dossiers} />}
 
         {/* Filters */}
         <div className="flex flex-col gap-4 sm:flex-row print:hidden">
@@ -244,7 +252,7 @@ export default function Reports() {
           <div className="flex items-center justify-center py-12 print:hidden">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
-        ) : filteredDossiers.length === 0 ? (
+        ) : error ? null : filteredDossiers.length === 0 ? (
           <Card className="print:hidden">
             <CardContent className="flex flex-col items-center justify-center py-12">
               <FileBarChart className="h-12 w-12 text-muted-foreground/50" />
@@ -308,7 +316,7 @@ export default function Reports() {
                   
                   {dossier.has_gaps && (
                     <div className="mt-4 rounded-md bg-warning/10 p-3 text-sm">
-                      <p className="font-medium text-warning">Lacunas detectadas:</p>
+                      <p className="font-medium text-warning">Lacunas factuais identificadas:</p>
                       <ul className="mt-1 list-disc list-inside text-muted-foreground">
                         {dossier.document_count === 0 && (
                           <li>Nenhum documento associado ao dossiê</li>
@@ -326,7 +334,9 @@ export default function Reports() {
         )}
 
         {/* Print View */}
-        <ReportsPrintView ref={printRef} dossiers={filteredDossiers} stats={stats} />
+        <div className="hidden print:block">
+          <ReportsPrintView ref={printRef} dossiers={filteredDossiers} stats={stats} />
+        </div>
       </div>
     </DashboardLayout>
   );
