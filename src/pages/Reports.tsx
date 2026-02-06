@@ -9,9 +9,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { FileBarChart, Loader2, AlertTriangle, CheckCircle2, FileText, FileDown, ArrowUpDown, RefreshCw } from 'lucide-react';
+import { FileBarChart, Loader2, AlertTriangle, CheckCircle2, FileText, FileDown, ArrowUpDown, RefreshCw, FileCheck } from 'lucide-react';
 import { ReportsCharts } from '@/components/reports/ReportsCharts';
 import { ReportsPrintView } from '@/components/reports/ReportsPrintView';
+import { forwardRef } from 'react';
 
 type DossierStatus = 'em_analise' | 'pendente' | 'completo' | 'arquivado';
 
@@ -24,6 +25,7 @@ interface Dossier {
   document_count: number;
   chronology_count: number;
   has_gaps: boolean;
+  gaps_details?: string[];
 }
 
 const statusLabels: Record<DossierStatus, string> = {
@@ -44,15 +46,93 @@ const categoryLabels: Record<string, string> = {
 
 type SortOption = 'updated_at' | 'title' | 'document_count' | 'chronology_count';
 
+// Componente para o Relatório Final (print view custom para single dossier)
+const FinalReportView = forwardRef<HTMLDivElement, { dossier: Dossier; docs: any[]; chronos: any[]; lacunas: string[] }>(
+  ({ dossier, docs, chronos, lacunas }, ref) => (
+    <div ref={ref} className="p-4 font-sans">
+      <h1 className="text-2xl font-bold mb-4">Relatório de Organização Documental e Apoio Factual - {dossier.title}</h1>
+      <p className="mb-2">Data de Geração: {new Date().toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit', year: 'numeric' })}</p>
+      <p className="mb-2">Método: Organização baseada em documentação fornecida pelo cliente e fontes abertas legítimas. Factos validados por datas, entidades e sequência.</p>
+      <p className="mb-4 font-bold">Disclaimer: Este serviço é técnico e não jurídico. Não presta aconselhamento, interpretação da lei ou representação. A responsabilidade pela utilização jurídica é sempre do cliente ou do seu advogado.</p>
+
+      <h2 className="text-xl font-semibold mb-2">Dossiê Documental Organizado</h2>
+      {docs.length > 0 ? (
+        <table className="w-full border-collapse mb-4">
+          <thead>
+            <tr className="bg-gray-100">
+              <th className="border p-2 text-left">ID</th>
+              <th className="border p-2 text-left">Nome</th>
+              <th className="border p-2 text-left">Tipo</th>
+              <th className="border p-2 text-left">Data</th>
+              <th className="border p-2 text-left">Fonte/Path</th>
+            </tr>
+          </thead>
+          <tbody>
+            {docs.map((doc) => (
+              <tr key={doc.id}>
+                <td className="border p-2">{doc.id}</td>
+                <td className="border p-2">{doc.name}</td>
+                <td className="border p-2">{doc.type || 'N/A'}</td>
+                <td className="border p-2">{new Date(doc.created_at).toLocaleDateString('pt-PT')}</td>
+                <td className="border p-2">{doc.path}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <p className="mb-4">Nenhum documento organizado.</p>
+      )}
+
+      <h2 className="text-xl font-semibold mb-2">Cronologia Factual Objetiva</h2>
+      {chronos.length > 0 ? (
+        <ul className="list-disc pl-5 mb-4">
+          {chronos.map((chrono, index) => (
+            <li key={index}>
+              {new Date(chrono.date).toLocaleDateString('pt-PT')}: {chrono.description} (Fonte: {chrono.source || 'Fornecida'})
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-4">Cronologia vazia.</p>
+      )}
+
+      <h2 className="text-xl font-semibold mb-2">Relatório de Lacunas Documentais</h2>
+      {lacunas.length > 0 ? (
+        <ul className="list-disc pl-5 mb-4">
+          {lacunas.map((lacuna, index) => (
+            <li key={index}>{lacuna}</li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mb-4">Nenhuma lacuna identificada.</p>
+      )}
+
+      <h2 className="text-xl font-semibold mb-2">Arquivo Organizado</h2>
+      <p>Estruturado digitalmente (pastas indexadas). Manutenção periódica disponível por 6-12 meses, renovável sob pedido.</p>
+
+      <p className="mt-4 text-sm italic">Cumprimento: RGPD e confidencialidade rigorosa. Fontes rastreáveis.</p>
+    </div>
+  )
+);
+
 export default function Reports() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const printRef = useRef<HTMLDivElement>(null);
+  const finalPrintRef = useRef<HTMLDivElement>(null);
   const handlePrint = useReactToPrint({
     content: () => printRef.current,
     documentTitle: 'Relatórios de Dossiês',
   });
+  const handleFinalPrint = useReactToPrint({
+    content: () => finalPrintRef.current,
+    documentTitle: 'Relatório Final de Dossiê',
+  });
   const [dossiers, setDossiers] = useState<Dossier[]>([]);
+  const [selectedDossier, setSelectedDossier] = useState<Dossier | null>(null);
+  const [docs, setDocs] = useState<any[]>([]);
+  const [chronos, setChronos] = useState<any[]>([]);
+  const [lacunas, setLacunas] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -87,12 +167,51 @@ export default function Reports() {
         document_count: d.document_count[0]?.count || 0,
         chronology_count: d.chronology_count[0]?.count || 0,
         has_gaps: d.document_count[0]?.count === 0 || d.chronology_count[0]?.count === 0,
+        gaps_details: [
+          d.document_count[0]?.count === 0 ? 'Nenhum documento associado ao dossiê' : '',
+          d.chronology_count[0]?.count === 0 ? 'Cronologia factual não iniciada' : ''
+        ].filter(Boolean),
       }));
 
       setDossiers(reportData);
     } catch (err) {
       console.error('Error fetching report data:', err);
       setError('Ocorreu um erro ao carregar os dados. Por favor, tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function generateFinalReport(dossier: Dossier) {
+    setLoading(true);
+    setError(null);
+    try {
+      const { data: docsData } = await supabase
+        .from('documents')
+        .select('id, name, type, created_at, path')
+        .eq('dossier_id', dossier.id)
+        .order('created_at');
+
+      const { data: chronosData } = await supabase
+        .from('chronology_entries')
+        .select('date, description, source')
+        .eq('dossier_id', dossier.id)
+        .order('date');
+
+      const newLacunas = [];
+      if (!docsData?.length) newLacunas.push('Ausência de documentos - sugerir recolha em fontes públicas legítimas (ex.: Portal das Finanças).');
+      if (!chronosData?.length) newLacunas.push('Cronologia vazia - validar sequência factual com dados disponíveis.');
+
+      setDocs(docsData || []);
+      setChronos(chronosData || []);
+      setLacunas(newLacunas);
+      setSelectedDossier(dossier);
+
+      // Aguarda um tick para o ref atualizar e imprime
+      setTimeout(handleFinalPrint, 0);
+    } catch (err) {
+      console.error('Error generating final report:', err);
+      setError('Ocorreu um erro ao gerar o relatório final.');
     } finally {
       setLoading(false);
     }
@@ -151,7 +270,7 @@ export default function Reports() {
           
           <Button variant="outline" className="gap-2" onClick={handlePrint}>
             <FileDown className="h-4 w-4" />
-            <span className="hidden sm:inline">Exportar PDF</span>
+            <span className="hidden sm:inline">Exportar PDF Geral</span>
           </Button>
         </div>
 
@@ -291,7 +410,7 @@ export default function Reports() {
                       )}
                     </div>
                     
-                    <div className="flex flex-wrap gap-4">
+                    <div className="flex flex-wrap gap-4 items-center">
                       <div className="flex items-center gap-2 text-sm">
                         <FileText className="h-4 w-4 text-muted-foreground" />
                         <span>{dossier.document_count} documentos</span>
@@ -311,6 +430,15 @@ export default function Reports() {
                           <span>Documentação completa</span>
                         </div>
                       )}
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        className="gap-1"
+                        onClick={(e) => { e.stopPropagation(); generateFinalReport(dossier); }}
+                      >
+                        <FileCheck className="h-4 w-4" />
+                        Relatório Final
+                      </Button>
                     </div>
                   </div>
                   
@@ -318,12 +446,9 @@ export default function Reports() {
                     <div className="mt-4 rounded-md bg-warning/10 p-3 text-sm">
                       <p className="font-medium text-warning">Lacunas factuais identificadas:</p>
                       <ul className="mt-1 list-disc list-inside text-muted-foreground">
-                        {dossier.document_count === 0 && (
-                          <li>Nenhum documento associado ao dossiê</li>
-                        )}
-                        {dossier.chronology_count === 0 && (
-                          <li>Cronologia factual não iniciada</li>
-                        )}
+                        {dossier.gaps_details?.map((gap, index) => (
+                          <li key={index}>{gap}</li>
+                        ))}
                       </ul>
                     </div>
                   )}
@@ -333,13 +458,19 @@ export default function Reports() {
           </div>
         )}
 
-
-
-        {/* Print View */}
+        {/* Print View Geral */}
         <div className="hidden print:block">
           <ReportsPrintView ref={printRef} dossiers={filteredDossiers} stats={stats} />
         </div>
+
+        {/* Print View para Relatório Final (escondido até chamado) */}
+        {selectedDossier && (
+          <div className="hidden">
+            <FinalReportView ref={finalPrintRef} dossier={selectedDossier} docs={docs} chronos={chronos} lacunas={lacunas} />
+          </div>
+        )}
       </div>
     </DashboardLayout>
   );
 }
+
