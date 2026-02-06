@@ -333,6 +333,8 @@ export default function Reports() {
           </div>
         )}
 
+
+
         {/* Print View */}
         <div className="hidden print:block">
           <ReportsPrintView ref={printRef} dossiers={filteredDossiers} stats={stats} />
