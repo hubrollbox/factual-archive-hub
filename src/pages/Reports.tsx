@@ -1,29 +1,35 @@
-import { useEffect, useState, useRef, useMemo, forwardRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Separator } from '@/components/ui/separator';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 import {
-  FileBarChart,
   Loader2,
   AlertTriangle,
-  CheckCircle2,
   FileText,
-  FileDown,
-  ArrowUpDown,
+  Clock,
+  Download,
+  ChevronDown,
+  Link2,
+  Activity,
+  Table,
   RefreshCw,
-  FileCheck,
+  Printer,
 } from 'lucide-react';
 
+import { DossierSelector } from '@/components/reports/DossierSelector';
+import { ReportBlock } from '@/components/reports/ReportBlock';
 import { ReportsCharts } from '@/components/reports/ReportsCharts';
-import { ReportsPrintView } from '@/components/reports/ReportsPrintView';
+import { analyzeGaps, GapsReportList } from '@/components/reports/GapsReport';
+import { analyzeInconsistencies, InconsistenciesList } from '@/components/reports/InconsistenciesReport';
+import { analyzeRelations, RelationsReportList } from '@/components/reports/DocumentRelationsReport';
+import { downloadCSV } from '@/components/reports/CsvExporter';
+import { DossierReportPrintView } from '@/components/reports/ReportsPrintView';
 
 type DossierStatus = 'em_analise' | 'pendente' | 'completo' | 'arquivado';
 
@@ -33,239 +39,208 @@ interface Dossier {
   status: DossierStatus;
   category: string | null;
   client_name: string | null;
+  description: string | null;
   updated_at: string;
   document_count: number;
   chronology_count: number;
   has_gaps: boolean;
-  gaps_details: string[];
 }
 
-type SortOption = 'updated_at' | 'title' | 'document_count' | 'chronology_count';
+interface Document {
+  id: string;
+  title: string;
+  document_type: string;
+  document_date: string | null;
+  entity: string | null;
+  description: string | null;
+  created_at: string;
+}
 
-const statusLabels: Record<DossierStatus, string> = {
-  em_analise: 'Em Análise',
-  pendente: 'Pendente',
-  completo: 'Completo',
-  arquivado: 'Arquivado',
-};
-
-const statusVariants: Record<DossierStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
-  em_analise: 'default',
-  pendente: 'secondary',
-  completo: 'outline',
-  arquivado: 'destructive',
-};
-
-const categoryLabels: Record<string, string> = {
-  consumo: 'Consumo',
-  telecomunicacoes: 'Telecomunicações',
-  transito: 'Trânsito',
-  fiscal: 'Fiscal',
-  trabalho: 'Trabalho',
-  outros: 'Outros',
-};
-
-/* -------------------------------------------------------------------------- */
-/*                              RELATÓRIO FINAL                               */
-/* -------------------------------------------------------------------------- */
-
-const FinalReportView = forwardRef<
-  HTMLDivElement,
-  { dossier: Dossier; docs: any[]; chronos: any[]; lacunas: string[] }
->(({ dossier, docs, chronos, lacunas }, ref) => (
-  <div ref={ref} className="hidden print:block p-6 text-sm leading-relaxed">
-    <h1 className="text-2xl font-bold mb-4">
-      Relatório Final — {dossier.title}
-    </h1>
-
-    <p>Data de geração: {new Date().toLocaleDateString('pt-PT')}</p>
-
-    <p className="mt-4 font-semibold">Natureza do serviço</p>
-    <p>
-      Este relatório resulta de um serviço técnico de organização documental e
-      estruturação factual. Não constitui aconselhamento jurídico.
-    </p>
-
-    <h2 className="mt-6 font-semibold">1. Documentos Organizados</h2>
-    {docs.length ? (
-      <ul className="list-disc pl-6">
-        {docs.map(d => (
-          <li key={d.id}>
-            {d.title} — {new Date(d.created_at).toLocaleDateString('pt-PT')}
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p>Não existem documentos associados.</p>
-    )}
-
-    <h2 className="mt-6 font-semibold">2. Cronologia Factual</h2>
-    {chronos.length ? (
-      <ul className="list-disc pl-6">
-        {chronos.map((c, i) => (
-          <li key={i}>
-            {new Date(c.event_date).toLocaleDateString('pt-PT')} — {c.title}
-          </li>
-        ))}
-      </ul>
-    ) : (
-      <p>Cronologia não iniciada.</p>
-    )}
-
-    <h2 className="mt-6 font-semibold">3. Lacunas Identificadas</h2>
-    {lacunas.length ? (
-      <ul className="list-disc pl-6">
-        {lacunas.map((l, i) => (
-          <li key={i}>{l}</li>
-        ))}
-      </ul>
-    ) : (
-      <p>Não foram identificadas lacunas factuais.</p>
-    )}
-
-    <p className="mt-8 text-xs italic">
-      Relatório fechado à data de geração. Alterações posteriores ao dossiê não
-      se refletem neste documento.
-    </p>
-  </div>
-));
-FinalReportView.displayName = 'FinalReportView';
-
-/* -------------------------------------------------------------------------- */
-/*                                  PÁGINA                                    */
-/* -------------------------------------------------------------------------- */
+interface ChronologyEntry {
+  id: string;
+  title: string;
+  event_date: string;
+  description: string | null;
+  document_id: string | null;
+  source_reference: string | null;
+}
 
 export default function Reports() {
   const { user } = useAuth();
-  const navigate = useNavigate();
 
-  const printRef = useRef<HTMLDivElement>(null);
-  const finalPrintRef = useRef<HTMLDivElement>(null);
-
+  // --- Data state ---
   const [dossiers, setDossiers] = useState<Dossier[]>([]);
-  const [selectedDossier, setSelectedDossier] = useState<Dossier | null>(null);
-  const [docs, setDocs] = useState<any[]>([]);
-  const [chronos, setChronos] = useState<any[]>([]);
-  const [lacunas, setLacunas] = useState<string[]>([]);
-
+  const [selectedDossierId, setSelectedDossierId] = useState<string | null>(null);
+  const [docs, setDocs] = useState<Document[]>([]);
+  const [chronos, setChronos] = useState<ChronologyEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingDetail, setLoadingDetail] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [filterStatus, setFilterStatus] = useState('all');
-  const [filterCategory, setFilterCategory] = useState('all');
-  const [sortBy, setSortBy] = useState<SortOption>('updated_at');
+  // --- Print state ---
+  const [printMode, setPrintMode] = useState<'dossier' | 'chronology' | 'gaps' | null>(null);
+  const printRef = useRef<HTMLDivElement>(null);
 
+  // --- Collapsible state ---
+  const [techOpen, setTechOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
+
+  const selectedDossier = useMemo(
+    () => dossiers.find((d) => d.id === selectedDossierId) ?? null,
+    [dossiers, selectedDossierId]
+  );
+
+  // Derived analysis
+  const gaps = useMemo(() => {
+    if (!selectedDossier) return [];
+    return analyzeGaps(docs, chronos);
+  }, [selectedDossier, docs, chronos]);
+
+  const inconsistencies = useMemo(() => {
+    if (!selectedDossier) return [];
+    return analyzeInconsistencies(docs, chronos);
+  }, [selectedDossier, docs, chronos]);
+
+  const relations = useMemo(() => {
+    if (!selectedDossier) return null;
+    return analyzeRelations(docs, chronos);
+  }, [selectedDossier, docs, chronos]);
+
+  const gapCount = useMemo(
+    () => gaps.filter((g) => g.type === 'warning').length,
+    [gaps]
+  );
+
+  const inconsistencyCount = useMemo(
+    () => inconsistencies.filter((i) => i.message !== 'Nenhuma inconsistência detetada').length,
+    [inconsistencies]
+  );
+
+  // --- Load dossiers ---
   useEffect(() => {
-    if (user) loadData();
+    if (user) loadDossiers();
   }, [user]);
 
-  async function loadData() {
+  async function loadDossiers() {
     setLoading(true);
     setError(null);
-
     try {
-      const { data, error } = await supabase
+      const { data, error: fetchError } = await supabase
         .from('dossiers')
         .select(`
-          id,
-          title,
-          status,
-          category,
-          client_name,
-          updated_at,
+          id, title, status, category, client_name, description, updated_at,
           document_count:documents(count),
           chronology_count:chronology_entries(count)
         `)
         .eq('user_id', user!.id);
 
-      if (error) throw error;
+      if (fetchError) throw fetchError;
 
       const mapped: Dossier[] = (data || []).map((d: any) => {
         const docCount = d.document_count[0]?.count || 0;
         const chronoCount = d.chronology_count[0]?.count || 0;
-
         return {
           id: d.id,
           title: d.title,
           status: d.status,
           category: d.category,
           client_name: d.client_name,
+          description: d.description,
           updated_at: d.updated_at,
           document_count: docCount,
           chronology_count: chronoCount,
           has_gaps: docCount === 0 || chronoCount === 0,
-          gaps_details: [
-            docCount === 0 && 'Sem documentos associados',
-            chronoCount === 0 && 'Cronologia não iniciada',
-          ].filter(Boolean) as string[],
         };
       });
-
       setDossiers(mapped);
     } catch {
-      setError('Erro ao carregar relatórios.');
+      setError('Erro ao carregar dossiês.');
     } finally {
       setLoading(false);
     }
   }
 
-  async function generateFinalReport(dossier: Dossier) {
-    const { data: fetchedDocs } = await supabase
-      .from('documents')
-      .select('*')
-      .eq('dossier_id', dossier.id)
-      .order('created_at');
+  // --- Load dossier detail ---
+  const loadDossierDetail = useCallback(async (dossierId: string) => {
+    setLoadingDetail(true);
+    try {
+      const [docsRes, chronosRes] = await Promise.all([
+        supabase
+          .from('documents')
+          .select('id, title, document_type, document_date, entity, description, created_at')
+          .eq('dossier_id', dossierId)
+          .order('document_date', { ascending: true }),
+        supabase
+          .from('chronology_entries')
+          .select('id, title, event_date, description, document_id, source_reference')
+          .eq('dossier_id', dossierId)
+          .order('event_date', { ascending: true }),
+      ]);
 
-    const { data: fetchedChronos } = await supabase
-      .from('chronology_entries')
-      .select('*')
-      .eq('dossier_id', dossier.id)
-      .order('event_date');
-
-    const gaps: string[] = [];
-    if (!fetchedDocs?.length) gaps.push('Documentação inexistente');
-    if (!fetchedChronos?.length) gaps.push('Cronologia inexistente');
-
-    setSelectedDossier(dossier);
-    setDocs(fetchedDocs || []);
-    setChronos(fetchedChronos || []);
-    setLacunas(gaps);
-
-    setTimeout(() => window.print(), 100);
-  }
-
-  const filtered = useMemo(() => {
-    let res = [...dossiers];
-
-    if (filterStatus !== 'all') {
-      res =
-        filterStatus === 'with_gaps'
-          ? res.filter(d => d.has_gaps)
-          : res.filter(d => d.status === filterStatus);
+      setDocs(docsRes.data || []);
+      setChronos(chronosRes.data || []);
+    } catch {
+      // Silent fail - data will just be empty
+    } finally {
+      setLoadingDetail(false);
     }
+  }, []);
 
-    if (filterCategory !== 'all') {
-      res = res.filter(d => (d.category || 'outros') === filterCategory);
-    }
+  const handleDossierSelect = useCallback((id: string) => {
+    setSelectedDossierId(id);
+    loadDossierDetail(id);
+  }, [loadDossierDetail]);
 
-    return res.sort((a, b) => {
-      if (sortBy === 'updated_at')
-        return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
-      if (sortBy === 'title') return a.title.localeCompare(b.title);
-      if (sortBy === 'document_count') return b.document_count - a.document_count;
-      if (sortBy === 'chronology_count') return b.chronology_count - a.chronology_count;
-      return 0;
-    });
-  }, [dossiers, filterStatus, filterCategory, sortBy]);
+  // --- Print handlers ---
+  const handlePrint = useCallback((mode: 'dossier' | 'chronology' | 'gaps') => {
+    setPrintMode(mode);
+    setTimeout(() => window.print(), 150);
+    setTimeout(() => setPrintMode(null), 1000);
+  }, []);
 
-  const stats = useMemo(() => ({
-    total: dossiers.length,
-    withGaps: dossiers.filter(d => d.has_gaps).length,
-    complete: dossiers.filter(d => d.status === 'completo').length,
-    pending: dossiers.filter(d => d.status === 'pendente').length,
-  }), [dossiers]);
+  // --- CSV handlers ---
+  const handleCsvDocuments = useCallback(() => {
+    if (!selectedDossier || docs.length === 0) return;
+    const headers = ['Título', 'Tipo', 'Data', 'Entidade', 'Descrição'];
+    const rows = docs.map((d) => [
+      d.title,
+      d.document_type,
+      d.document_date || '',
+      d.entity || '',
+      d.description || '',
+    ]);
+    downloadCSV(headers, rows, `documentos_${selectedDossier.title}`);
+  }, [selectedDossier, docs]);
 
-  /* ---------------------------------------------------------------------- */
+  const handleCsvChronology = useCallback(() => {
+    if (!selectedDossier || chronos.length === 0) return;
+    const headers = ['Data', 'Título', 'Descrição', 'Fonte', 'Doc. Associado'];
+    const rows = chronos.map((c) => [
+      c.event_date,
+      c.title,
+      c.description || '',
+      c.source_reference || '',
+      c.document_id ? 'Sim' : 'Não',
+    ]);
+    downloadCSV(headers, rows, `cronologia_${selectedDossier.title}`);
+  }, [selectedDossier, chronos]);
+
+  const handleCsvDossier = useCallback(() => {
+    if (!selectedDossier) return;
+    const headers = ['Campo', 'Valor'];
+    const rows = [
+      ['Título', selectedDossier.title],
+      ['Estado', selectedDossier.status],
+      ['Categoria', selectedDossier.category || ''],
+      ['Cliente', selectedDossier.client_name || ''],
+      ['Documentos', String(selectedDossier.document_count)],
+      ['Entradas Cronologia', String(selectedDossier.chronology_count)],
+      ['Lacunas', selectedDossier.has_gaps ? 'Sim' : 'Não'],
+    ];
+    downloadCSV(headers, rows, `dossie_${selectedDossier.title}`);
+  }, [selectedDossier]);
+
+  const noDossierSelected = !selectedDossierId;
 
   return (
     <DashboardLayout>
@@ -277,19 +252,13 @@ export default function Reports() {
               Relatórios
             </h1>
             <p className="mt-1 text-muted-foreground">
-              Visão geral e análise dos dossiês
+              Geração e exportação de relatórios por dossiê
             </p>
           </div>
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm" onClick={loadData} className="gap-2">
-              <RefreshCw className="h-4 w-4" />
-              <span className="hidden sm:inline">Atualizar</span>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-2">
-              <FileDown className="h-4 w-4" />
-              <span className="hidden sm:inline">Exportar PDF</span>
-            </Button>
-          </div>
+          <Button variant="outline" size="sm" onClick={loadDossiers} className="gap-2">
+            <RefreshCw className="h-4 w-4" />
+            <span className="hidden sm:inline">Atualizar</span>
+          </Button>
         </div>
 
         {/* Error */}
@@ -307,177 +276,232 @@ export default function Reports() {
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <>
-            {/* Summary Cards */}
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 print:hidden">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Total Dossiês</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <FileBarChart className="h-5 w-5 text-primary" />
-                    <span className="text-2xl font-bold">{stats.total}</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Com Lacunas</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <AlertTriangle className="h-5 w-5 text-yellow-500" />
-                    <span className="text-2xl font-bold">{stats.withGaps}</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Completos</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    <span className="text-2xl font-bold">{stats.complete}</span>
-                  </div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardDescription>Pendentes</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-muted-foreground" />
-                    <span className="text-2xl font-bold">{stats.pending}</span>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+          <div className="space-y-8 print:hidden">
+            {/* ============ BLOCO 1 — Relatórios Principais ============ */}
+            <section>
+              <h2 className="mb-4 text-lg font-semibold text-foreground">
+                Relatórios Principais
+              </h2>
 
-            {/* Charts */}
-            <ReportsCharts dossiers={dossiers} />
+              <DossierSelector
+                dossiers={dossiers}
+                selectedId={selectedDossierId}
+                onSelect={handleDossierSelect}
+              />
 
-            {/* Filters */}
-            <div className="flex flex-col gap-4 sm:flex-row print:hidden">
-              <Select value={filterStatus} onValueChange={setFilterStatus}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Estado" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os estados</SelectItem>
-                  <SelectItem value="em_analise">Em Análise</SelectItem>
-                  <SelectItem value="pendente">Pendente</SelectItem>
-                  <SelectItem value="completo">Completo</SelectItem>
-                  <SelectItem value="arquivado">Arquivado</SelectItem>
-                  <SelectItem value="with_gaps">Com Lacunas</SelectItem>
-                </SelectContent>
-              </Select>
+              {loadingDetail ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                </div>
+              ) : (
+                <div className="mt-4 grid gap-4 md:grid-cols-3">
+                  <ReportBlock
+                    icon={FileText}
+                    title="Relatório do Dossiê"
+                    description="Resumo completo com índice de documentos, estado e descrição."
+                    badge={selectedDossier ? `${selectedDossier.document_count} docs` : undefined}
+                    disabled={noDossierSelected}
+                    actions={[
+                      {
+                        label: 'Gerar PDF',
+                        icon: Printer,
+                        onClick: () => handlePrint('dossier'),
+                        disabled: noDossierSelected,
+                      },
+                    ]}
+                  />
 
-              <Select value={filterCategory} onValueChange={setFilterCategory}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <SelectValue placeholder="Categoria" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as categorias</SelectItem>
-                  {Object.entries(categoryLabels).map(([key, label]) => (
-                    <SelectItem key={key} value={key}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                  <ReportBlock
+                    icon={Clock}
+                    title="Cronologia Factual"
+                    description="Timeline ordenada de todos os eventos do dossiê."
+                    badge={selectedDossier ? `${selectedDossier.chronology_count} entradas` : undefined}
+                    disabled={noDossierSelected}
+                    actions={[
+                      {
+                        label: 'PDF',
+                        icon: Printer,
+                        onClick: () => handlePrint('chronology'),
+                        disabled: noDossierSelected,
+                      },
+                      {
+                        label: 'CSV',
+                        icon: Download,
+                        onClick: handleCsvChronology,
+                        disabled: noDossierSelected || chronos.length === 0,
+                        variant: 'secondary',
+                      },
+                    ]}
+                  />
 
-              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
-                <SelectTrigger className="w-full sm:w-48">
-                  <ArrowUpDown className="mr-2 h-4 w-4" />
-                  <SelectValue placeholder="Ordenar" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="updated_at">Mais recentes</SelectItem>
-                  <SelectItem value="title">Título (A-Z)</SelectItem>
-                  <SelectItem value="document_count">Mais documentos</SelectItem>
-                  <SelectItem value="chronology_count">Mais entradas</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Dossier List */}
-            {filtered.length === 0 ? (
-              <Card className="print:hidden">
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <FileBarChart className="h-12 w-12 text-muted-foreground/50" />
-                  <h3 className="mt-4 font-medium text-foreground">Sem dossiês</h3>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    Nenhum dossiê corresponde aos filtros selecionados.
-                  </p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 print:hidden">
-                {filtered.map((d) => (
-                  <Card
-                    key={d.id}
-                    className="cursor-pointer transition-shadow hover:shadow-md"
-                    onClick={() => navigate(`/dashboard/dossiers/${d.id}`)}
+                  <ReportBlock
+                    icon={AlertTriangle}
+                    title="Relatório de Lacunas"
+                    description="Identificação de documentação em falta ou incompleta."
+                    badge={selectedDossier ? `${gapCount} lacuna(s)` : undefined}
+                    badgeVariant={gapCount > 0 ? 'destructive' : 'secondary'}
+                    disabled={noDossierSelected}
+                    actions={[
+                      {
+                        label: 'Gerar PDF',
+                        icon: Printer,
+                        onClick: () => handlePrint('gaps'),
+                        disabled: noDossierSelected,
+                      },
+                    ]}
                   >
-                    <CardHeader className="pb-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <CardTitle className="text-base leading-snug">{d.title}</CardTitle>
-                        <Badge variant={statusVariants[d.status]}>
-                          {statusLabels[d.status]}
-                        </Badge>
-                      </div>
-                      {d.client_name && (
-                        <CardDescription>{d.client_name}</CardDescription>
-                      )}
-                    </CardHeader>
-                    <CardContent>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <span>{d.document_count} docs</span>
-                        <span>{d.chronology_count} entradas</span>
-                        <span className="text-xs">
-                          {categoryLabels[d.category || 'outros'] || d.category}
-                        </span>
-                      </div>
-                      {d.has_gaps && (
-                        <div className="mt-2 flex items-center gap-1 text-xs text-yellow-600">
-                          <AlertTriangle className="h-3 w-3" />
-                          <span>{d.gaps_details.join(' · ')}</span>
-                        </div>
-                      )}
-                      <div className="mt-3 flex justify-end">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="gap-1 text-xs"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            generateFinalReport(d);
-                          }}
-                        >
-                          <FileCheck className="h-3 w-3" />
-                          Relatório Final
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            )}
-          </>
+                    {selectedDossier && <GapsReportList gaps={gaps} />}
+                  </ReportBlock>
+                </div>
+              )}
+
+              {noDossierSelected && (
+                <p className="mt-3 text-sm text-muted-foreground">
+                  Selecione um dossiê acima para gerar relatórios.
+                </p>
+              )}
+            </section>
+
+            <Separator />
+
+            {/* ============ BLOCO 2 — Relatórios Técnicos ============ */}
+            <Collapsible open={techOpen} onOpenChange={setTechOpen}>
+              <CollapsibleTrigger asChild>
+                <button className="flex w-full items-center justify-between rounded-md px-1 py-2 text-left transition-colors hover:bg-muted/50">
+                  <h2 className="text-lg font-semibold text-foreground">
+                    Relatórios Técnicos
+                  </h2>
+                  <ChevronDown
+                    className={`h-5 w-5 text-muted-foreground transition-transform ${
+                      techOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-4 space-y-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <ReportBlock
+                    icon={AlertTriangle}
+                    title="Inconsistências"
+                    description="Datas fora de ordem, documentos sem data, fontes em falta."
+                    badge={selectedDossier ? `${inconsistencyCount} alerta(s)` : undefined}
+                    badgeVariant={inconsistencyCount > 0 ? 'destructive' : 'secondary'}
+                    disabled={noDossierSelected}
+                    actions={[]}
+                  >
+                    {selectedDossier && <InconsistenciesList issues={inconsistencies} />}
+                  </ReportBlock>
+
+                  <ReportBlock
+                    icon={Link2}
+                    title="Relações entre Documentos"
+                    description="Cobertura documental das entradas de cronologia."
+                    badge={relations ? `${relations.coveragePercent}%` : undefined}
+                    disabled={noDossierSelected}
+                    actions={[]}
+                  >
+                    {relations && <RelationsReportList analysis={relations} />}
+                  </ReportBlock>
+
+                  <ReportBlock
+                    icon={Activity}
+                    title="Atividade / Histórico"
+                    description="Métricas do portfolio: distribuição por estado e categoria."
+                    disabled={false}
+                    actions={[]}
+                  >
+                    <ReportsCharts dossiers={dossiers} />
+                  </ReportBlock>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+
+            <Separator />
+
+            {/* ============ BLOCO 3 — Exportações Brutas ============ */}
+            <Collapsible open={exportOpen} onOpenChange={setExportOpen}>
+              <CollapsibleTrigger asChild>
+                <button className="flex w-full items-center justify-between rounded-md px-1 py-2 text-left transition-colors hover:bg-muted/50">
+                  <h2 className="text-lg font-semibold text-foreground">
+                    Exportações Brutas
+                  </h2>
+                  <ChevronDown
+                    className={`h-5 w-5 text-muted-foreground transition-transform ${
+                      exportOpen ? 'rotate-180' : ''
+                    }`}
+                  />
+                </button>
+              </CollapsibleTrigger>
+              <CollapsibleContent className="mt-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <ReportBlock
+                    icon={Table}
+                    title="CSV Documentos"
+                    description="Exporta todos os documentos do dossiê como CSV."
+                    badge={selectedDossier ? `${docs.length} registos` : undefined}
+                    disabled={noDossierSelected}
+                    actions={[
+                      {
+                        label: 'Descarregar',
+                        icon: Download,
+                        onClick: handleCsvDocuments,
+                        disabled: noDossierSelected || docs.length === 0,
+                      },
+                    ]}
+                  />
+
+                  <ReportBlock
+                    icon={Table}
+                    title="CSV Cronologia"
+                    description="Exporta as entradas cronológicas como CSV."
+                    badge={selectedDossier ? `${chronos.length} registos` : undefined}
+                    disabled={noDossierSelected}
+                    actions={[
+                      {
+                        label: 'Descarregar',
+                        icon: Download,
+                        onClick: handleCsvChronology,
+                        disabled: noDossierSelected || chronos.length === 0,
+                      },
+                    ]}
+                  />
+
+                  <ReportBlock
+                    icon={Table}
+                    title="CSV Dossiê"
+                    description="Exporta os metadados do dossiê como CSV."
+                    disabled={noDossierSelected}
+                    actions={[
+                      {
+                        label: 'Descarregar',
+                        icon: Download,
+                        onClick: handleCsvDossier,
+                        disabled: noDossierSelected,
+                      },
+                    ]}
+                  />
+                </div>
+
+                {noDossierSelected && (
+                  <p className="mt-3 text-sm text-muted-foreground">
+                    Selecione um dossiê primeiro para exportar dados.
+                  </p>
+                )}
+              </CollapsibleContent>
+            </Collapsible>
+          </div>
         )}
       </div>
 
-      {/* Print Views */}
-      <ReportsPrintView ref={printRef} dossiers={filtered} stats={stats} />
-
-      {selectedDossier && (
-        <FinalReportView
-          ref={finalPrintRef}
+      {/* Print Views — hidden on screen, shown on print */}
+      {printMode && selectedDossier && (
+        <DossierReportPrintView
+          ref={printRef}
+          mode={printMode}
           dossier={selectedDossier}
           docs={docs}
           chronos={chronos}
-          lacunas={lacunas}
+          gaps={gaps}
         />
       )}
     </DashboardLayout>
