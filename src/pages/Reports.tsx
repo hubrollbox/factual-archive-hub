@@ -1,6 +1,5 @@
 import { useEffect, useState, useRef, useMemo, forwardRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useReactToPrint } from 'react-to-print';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/lib/auth';
 
@@ -50,6 +49,13 @@ const statusLabels: Record<DossierStatus, string> = {
   arquivado: 'Arquivado',
 };
 
+const statusVariants: Record<DossierStatus, 'default' | 'secondary' | 'outline' | 'destructive'> = {
+  em_analise: 'default',
+  pendente: 'secondary',
+  completo: 'outline',
+  arquivado: 'destructive',
+};
+
 const categoryLabels: Record<string, string> = {
   consumo: 'Consumo',
   telecomunicacoes: 'Telecomunicações',
@@ -67,16 +73,14 @@ const FinalReportView = forwardRef<
   HTMLDivElement,
   { dossier: Dossier; docs: any[]; chronos: any[]; lacunas: string[] }
 >(({ dossier, docs, chronos, lacunas }, ref) => (
-  <div ref={ref} className="p-6 text-sm leading-relaxed">
+  <div ref={ref} className="hidden print:block p-6 text-sm leading-relaxed">
     <h1 className="text-2xl font-bold mb-4">
       Relatório Final — {dossier.title}
     </h1>
 
     <p>Data de geração: {new Date().toLocaleDateString('pt-PT')}</p>
 
-    <p className="mt-4 font-semibold">
-      Natureza do serviço
-    </p>
+    <p className="mt-4 font-semibold">Natureza do serviço</p>
     <p>
       Este relatório resulta de um serviço técnico de organização documental e
       estruturação factual. Não constitui aconselhamento jurídico.
@@ -87,7 +91,7 @@ const FinalReportView = forwardRef<
       <ul className="list-disc pl-6">
         {docs.map(d => (
           <li key={d.id}>
-            {d.name} — {new Date(d.created_at).toLocaleDateString('pt-PT')}
+            {d.title} — {new Date(d.created_at).toLocaleDateString('pt-PT')}
           </li>
         ))}
       </ul>
@@ -100,7 +104,7 @@ const FinalReportView = forwardRef<
       <ul className="list-disc pl-6">
         {chronos.map((c, i) => (
           <li key={i}>
-            {new Date(c.date).toLocaleDateString('pt-PT')} — {c.description}
+            {new Date(c.event_date).toLocaleDateString('pt-PT')} — {c.title}
           </li>
         ))}
       </ul>
@@ -125,6 +129,7 @@ const FinalReportView = forwardRef<
     </p>
   </div>
 ));
+FinalReportView.displayName = 'FinalReportView';
 
 /* -------------------------------------------------------------------------- */
 /*                                  PÁGINA                                    */
@@ -149,16 +154,6 @@ export default function Reports() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCategory, setFilterCategory] = useState('all');
   const [sortBy, setSortBy] = useState<SortOption>('updated_at');
-
-  const handlePrint = useReactToPrint({
-    content: () => printRef.current,
-    documentTitle: 'Relatório Geral Interno',
-  });
-
-  const handleFinalPrint = useReactToPrint({
-    content: () => finalPrintRef.current,
-    documentTitle: 'Relatório Final de Dossiê',
-  });
 
   useEffect(() => {
     if (user) loadData();
@@ -202,7 +197,7 @@ export default function Reports() {
           gaps_details: [
             docCount === 0 && 'Sem documentos associados',
             chronoCount === 0 && 'Cronologia não iniciada',
-          ].filter(Boolean),
+          ].filter(Boolean) as string[],
         };
       });
 
@@ -215,28 +210,28 @@ export default function Reports() {
   }
 
   async function generateFinalReport(dossier: Dossier) {
-    const { data: docs } = await supabase
+    const { data: fetchedDocs } = await supabase
       .from('documents')
       .select('*')
       .eq('dossier_id', dossier.id)
       .order('created_at');
 
-    const { data: chronos } = await supabase
+    const { data: fetchedChronos } = await supabase
       .from('chronology_entries')
       .select('*')
       .eq('dossier_id', dossier.id)
-      .order('date');
+      .order('event_date');
 
     const gaps: string[] = [];
-    if (!docs?.length) gaps.push('Documentação inexistente');
-    if (!chronos?.length) gaps.push('Cronologia inexistente');
+    if (!fetchedDocs?.length) gaps.push('Documentação inexistente');
+    if (!fetchedChronos?.length) gaps.push('Cronologia inexistente');
 
     setSelectedDossier(dossier);
-    setDocs(docs || []);
-    setChronos(chronos || []);
+    setDocs(fetchedDocs || []);
+    setChronos(fetchedChronos || []);
     setLacunas(gaps);
 
-    setTimeout(handleFinalPrint, 0);
+    setTimeout(() => window.print(), 100);
   }
 
   const filtered = useMemo(() => {
@@ -263,12 +258,228 @@ export default function Reports() {
     });
   }, [dossiers, filterStatus, filterCategory, sortBy]);
 
+  const stats = useMemo(() => ({
+    total: dossiers.length,
+    withGaps: dossiers.filter(d => d.has_gaps).length,
+    complete: dossiers.filter(d => d.status === 'completo').length,
+    pending: dossiers.filter(d => d.status === 'pendente').length,
+  }), [dossiers]);
+
   /* ---------------------------------------------------------------------- */
 
   return (
     <DashboardLayout>
-      {/* UI igual ao teu, sem alterações funcionais */}
-      {/* O essencial já está todo corrigido acima */}
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between print:hidden">
+          <div>
+            <h1 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
+              Relatórios
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              Visão geral e análise dos dossiês
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={loadData} className="gap-2">
+              <RefreshCw className="h-4 w-4" />
+              <span className="hidden sm:inline">Atualizar</span>
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => window.print()} className="gap-2">
+              <FileDown className="h-4 w-4" />
+              <span className="hidden sm:inline">Exportar PDF</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Error */}
+        {error && (
+          <Alert variant="destructive" className="print:hidden">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Erro</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        )}
+
+        {/* Loading */}
+        {loading ? (
+          <div className="flex items-center justify-center py-12 print:hidden">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <>
+            {/* Summary Cards */}
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 print:hidden">
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Total Dossiês</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <FileBarChart className="h-5 w-5 text-primary" />
+                    <span className="text-2xl font-bold">{stats.total}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Com Lacunas</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-5 w-5 text-yellow-500" />
+                    <span className="text-2xl font-bold">{stats.withGaps}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Completos</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <span className="text-2xl font-bold">{stats.complete}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardDescription>Pendentes</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-muted-foreground" />
+                    <span className="text-2xl font-bold">{stats.pending}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Charts */}
+            <ReportsCharts dossiers={dossiers} />
+
+            {/* Filters */}
+            <div className="flex flex-col gap-4 sm:flex-row print:hidden">
+              <Select value={filterStatus} onValueChange={setFilterStatus}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Estado" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os estados</SelectItem>
+                  <SelectItem value="em_analise">Em Análise</SelectItem>
+                  <SelectItem value="pendente">Pendente</SelectItem>
+                  <SelectItem value="completo">Completo</SelectItem>
+                  <SelectItem value="arquivado">Arquivado</SelectItem>
+                  <SelectItem value="with_gaps">Com Lacunas</SelectItem>
+                </SelectContent>
+              </Select>
+
+              <Select value={filterCategory} onValueChange={setFilterCategory}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as categorias</SelectItem>
+                  {Object.entries(categoryLabels).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select value={sortBy} onValueChange={(v) => setSortBy(v as SortOption)}>
+                <SelectTrigger className="w-full sm:w-48">
+                  <ArrowUpDown className="mr-2 h-4 w-4" />
+                  <SelectValue placeholder="Ordenar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="updated_at">Mais recentes</SelectItem>
+                  <SelectItem value="title">Título (A-Z)</SelectItem>
+                  <SelectItem value="document_count">Mais documentos</SelectItem>
+                  <SelectItem value="chronology_count">Mais entradas</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Dossier List */}
+            {filtered.length === 0 ? (
+              <Card className="print:hidden">
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <FileBarChart className="h-12 w-12 text-muted-foreground/50" />
+                  <h3 className="mt-4 font-medium text-foreground">Sem dossiês</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Nenhum dossiê corresponde aos filtros selecionados.
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 print:hidden">
+                {filtered.map((d) => (
+                  <Card
+                    key={d.id}
+                    className="cursor-pointer transition-shadow hover:shadow-md"
+                    onClick={() => navigate(`/dashboard/dossiers/${d.id}`)}
+                  >
+                    <CardHeader className="pb-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <CardTitle className="text-base leading-snug">{d.title}</CardTitle>
+                        <Badge variant={statusVariants[d.status]}>
+                          {statusLabels[d.status]}
+                        </Badge>
+                      </div>
+                      {d.client_name && (
+                        <CardDescription>{d.client_name}</CardDescription>
+                      )}
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <span>{d.document_count} docs</span>
+                        <span>{d.chronology_count} entradas</span>
+                        <span className="text-xs">
+                          {categoryLabels[d.category || 'outros'] || d.category}
+                        </span>
+                      </div>
+                      {d.has_gaps && (
+                        <div className="mt-2 flex items-center gap-1 text-xs text-yellow-600">
+                          <AlertTriangle className="h-3 w-3" />
+                          <span>{d.gaps_details.join(' · ')}</span>
+                        </div>
+                      )}
+                      <div className="mt-3 flex justify-end">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 text-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            generateFinalReport(d);
+                          }}
+                        >
+                          <FileCheck className="h-3 w-3" />
+                          Relatório Final
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Print Views */}
+      <ReportsPrintView ref={printRef} dossiers={filtered} stats={stats} />
+
+      {selectedDossier && (
+        <FinalReportView
+          ref={finalPrintRef}
+          dossier={selectedDossier}
+          docs={docs}
+          chronos={chronos}
+          lacunas={lacunas}
+        />
+      )}
     </DashboardLayout>
   );
 }
