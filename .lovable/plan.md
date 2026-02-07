@@ -1,231 +1,162 @@
 
-# Plano: Melhorias Completas - Cronologia e Relatorios
+# Reorganizacao da Pagina de Relatorios em 3 Blocos
 
-## Resumo
+## Objetivo
 
-Este plano implementa todas as melhorias sugeridas para as paginas de Cronologia e Relatorios:
+Reestruturar completamente a pagina de Relatorios (`src/pages/Reports.tsx`) para deixar de ser uma lista corrida de cards de dossies e passar a ser uma interface organizada em **3 blocos hierarquicos**, focada na geracao e exportacao de relatorios por dossie.
 
-1. **Cronologia**: Edicao de entradas, confirmacao de eliminacao, pesquisa por texto, ligacao a documentos
-2. **Relatorios**: Links para dossies, filtro por categoria, ordenacao, graficos visuais
-3. **Exportacao PDF**: Para ambas as paginas
-
----
-
-## Parte 1: Melhorias na Cronologia
-
-### 1.1 Confirmacao de Eliminacao
-
-Adicionar um dialogo de confirmacao (AlertDialog) antes de eliminar uma entrada para prevenir eliminacoes acidentais.
-
-**Ficheiros afetados:**
-- `src/pages/Chronology.tsx`
-
-**Alteracoes:**
-- Importar componentes AlertDialog
-- Criar estado para controlar qual entrada esta a ser eliminada
-- Substituir a eliminacao direta por um fluxo com confirmacao
-
-### 1.2 Edicao de Entradas
-
-Permitir editar entradas existentes reutilizando o formulario de criacao.
-
-**Alteracoes:**
-- Adicionar estado `editingEntry` para guardar a entrada em edicao
-- Adicionar botao de edicao (icone Edit) ao lado do botao de eliminar
-- Reutilizar o Dialog existente para edicao (pre-preencher o formulario)
-- Criar funcao `handleUpdateEntry` para atualizar via Supabase
-
-### 1.3 Pesquisa por Texto
-
-Adicionar campo de pesquisa para filtrar entradas por titulo, descricao ou fonte.
-
-**Alteracoes:**
-- Adicionar estado `searchQuery` para guardar o termo de pesquisa
-- Adicionar Input de pesquisa ao lado do filtro por dossie
-- Filtrar `filteredEntries` pelo termo de pesquisa (case-insensitive)
-
-### 1.4 Ligacao a Documentos (opcional)
-
-O campo `document_id` ja existe na tabela `chronology_entries`. Adicionar selector de documento no formulario.
-
-**Alteracoes:**
-- Buscar documentos do dossie selecionado
-- Adicionar Select opcional para associar documento
-- Mostrar documento associado no card da entrada
-
----
-
-## Parte 2: Melhorias nos Relatorios
-
-### 2.1 Links de Navegacao para Dossies
-
-Tornar os cards de dossie clicaveis para navegar diretamente ao detalhe.
-
-**Ficheiros afetados:**
-- `src/pages/Reports.tsx`
-
-**Alteracoes:**
-- Importar `useNavigate` do react-router-dom
-- Adicionar `onClick` nos cards para navegar para `/dashboard/dossiers/{id}`
-- Adicionar cursor pointer e hover state
-
-### 2.2 Filtro por Categoria
-
-Os dossies ja tem campo `category`. Adicionar filtro adicional.
-
-**Alteracoes:**
-- Buscar categoria na query de dossies
-- Adicionar estado `filterCategory`
-- Adicionar Select para filtrar por categoria
-- Aplicar filtro adicional em `filteredDossiers`
-
-### 2.3 Ordenacao
-
-Permitir ordenar por diferentes criterios.
-
-**Alteracoes:**
-- Adicionar estado `sortBy` (updated_at, title, document_count, chronology_count)
-- Adicionar Select para escolher ordenacao
-- Ordenar `filteredDossiers` antes de renderizar
-
-### 2.4 Graficos Visuais com Recharts
-
-Adicionar graficos de distribuicao usando o componente Chart existente.
-
-**Alteracoes:**
-- Importar componentes do recharts (PieChart, BarChart, etc.)
-- Adicionar seccao de graficos com:
-  - Pie chart: Distribuicao por estado
-  - Bar chart: Distribuicao por categoria
-  - Bar chart: Top 5 dossies por documentos/entradas
-
----
-
-## Parte 3: Exportacao PDF
-
-### 3.1 Estrategia
-
-Usar a biblioteca nativa `window.print()` com estilos de impressao, evitando dependencias adicionais pesadas.
-
-**Alternativa mais robusta:** Criar um componente de visualizacao para impressao e usar CSS `@media print`.
-
-### 3.2 Cronologia
-
-**Alteracoes:**
-- Adicionar botao "Exportar PDF" no header
-- Criar componente `ChronologyPrintView` com layout otimizado para impressao
-- Usar `window.print()` apos renderizar a vista de impressao
-
-### 3.3 Relatorios
-
-**Alteracoes:**
-- Adicionar botao "Exportar PDF" no header
-- Criar componente `ReportPrintView` com tabela resumo
-- Incluir estatisticas e lista de lacunas
-
----
-
-## Estrutura de Ficheiros
+## Estrutura Proposta
 
 ```text
-src/
-  pages/
-    Chronology.tsx        (modificado)
-    Reports.tsx           (modificado)
-  components/
-    chronology/
-      ChronologyEntryCard.tsx    (novo - componente extraido)
-      ChronologyForm.tsx         (novo - formulario reutilizavel)
-    reports/
-      ReportsCharts.tsx          (novo - graficos)
-      ReportsPrintView.tsx       (novo - vista impressao)
++--------------------------------------------+
+| Header: Relatorios + [Atualizar]           |
++--------------------------------------------+
+|                                            |
+| BLOCO 1 - Relatorios Principais           |
+| (sempre visivel)                           |
+|                                            |
+| [Selector de Dossie]                       |
+|                                            |
+| +--------+ +----------+ +----------+      |
+| |Relatorio| |Cronologia| |Relatorio |      |
+| |do Dossie| |Factual   | |de Lacunas|      |
+| |  (PDF)  | |(PDF/CSV) | |  (PDF)   |      |
+| +--------+ +----------+ +----------+      |
+|                                            |
++--------------------------------------------+
+|                                            |
+| > Relatorios Tecnicos (colapsado)          |
+|   - Inconsistencias                        |
+|   - Relacoes entre documentos              |
+|   - Atividade / historico                  |
+|                                            |
++--------------------------------------------+
+|                                            |
+| > Exportacoes Brutas (colapsado)           |
+|   - CSV documentos                         |
+|   - CSV cronologia                         |
+|   - CSV dossie                             |
+|                                            |
++--------------------------------------------+
 ```
 
----
+## Detalhes por Bloco
+
+### BLOCO 1 -- Relatorios Principais (visivel por defeito)
+
+Contem um selector de dossie no topo e 3 cards de acao, cada um com icone, titulo, descricao curta e botao de geracao/exportacao:
+
+1. **Relatorio do Dossie (PDF)** -- Resumo completo do dossie incluindo indice de documentos, estado atual, entidade principal e descricao. Usa `window.print()` com vista formatada.
+
+2. **Cronologia Factual (PDF / CSV)** -- Timeline ordenada de todos os eventos do dossie. Opcao de exportar como PDF (via impressao) ou como CSV (download direto).
+
+3. **Relatorio de Lacunas (PDF)** -- Identifica documentacao em falta: dossie sem documentos, sem cronologia, sem datas, etc. Exporta via `window.print()`.
+
+Cada card mostra um badge com o numero de itens relevantes (ex.: "12 documentos", "5 entradas", "2 lacunas").
+
+### BLOCO 2 -- Relatorios Tecnicos (colapsado por defeito)
+
+Usa o componente `Collapsible` do Radix (ja instalado). Abre com clique em "Relatorios Avancados".
+
+3 cards descritivos:
+
+1. **Inconsistencias** -- Identifica datas fora de ordem, documentos sem data, entradas de cronologia sem fonte. Mostra contagem de alertas.
+
+2. **Relacoes entre Documentos** -- Lista quais entradas da cronologia estao ligadas a documentos e quais nao. Mostra percentagem de cobertura.
+
+3. **Atividade / Historico** -- Mostra os graficos atuais (distribuicao por estado e categoria) movidos para aqui, representando metricas tecnicas do portfolio.
+
+### BLOCO 3 -- Exportacoes Brutas (colapsado por defeito)
+
+Tambem usa `Collapsible`. 3 botoes simples de download:
+
+1. **CSV Documentos** -- Exporta todos os documentos do dossie selecionado como CSV.
+2. **CSV Cronologia** -- Exporta todas as entradas cronologicas como CSV.
+3. **CSV Dossie** -- Exporta os metadados do dossie como CSV.
+
+Se nenhum dossie estiver selecionado, os botoes ficam desativados com mensagem "Selecione um dossie primeiro".
 
 ## Detalhes Tecnicos
 
-### Cronologia - Codigo Principal
+### Ficheiros a Modificar
+
+- **`src/pages/Reports.tsx`** -- Reescrita quase total da UI (manter a logica de dados existente)
+
+### Ficheiros a Criar
+
+- **`src/components/reports/ReportBlock.tsx`** -- Componente reutilizavel para cada card de relatorio (icone, titulo, descricao, badge, botao de acao)
+- **`src/components/reports/DossierSelector.tsx`** -- Selector de dossie com resumo rapido do dossie selecionado
+- **`src/components/reports/GapsReport.tsx`** -- Logica de analise de lacunas expandida
+- **`src/components/reports/InconsistenciesReport.tsx`** -- Analise de inconsistencias (datas, fontes em falta)
+- **`src/components/reports/DocumentRelationsReport.tsx`** -- Analise de cobertura documentos-cronologia
+- **`src/components/reports/CsvExporter.tsx`** -- Utilitario para gerar e descarregar ficheiros CSV
+
+### Ficheiros Existentes a Manter
+
+- **`src/components/reports/ReportsCharts.tsx`** -- Move para dentro do Bloco 2 (Atividade/Historico)
+- **`src/components/reports/ReportsPrintView.tsx`** -- Atualizada para servir o Relatorio do Dossie do Bloco 1
+- **`FinalReportView`** (em Reports.tsx) -- Refatorada para componente separado
+
+### Logica de Dados
+
+A query principal mantem-se igual, buscando todos os dossies com contagens. Quando o utilizador seleciona um dossie:
+
+1. Busca documentos completos (`documents` filtrados por `dossier_id`)
+2. Busca cronologia completa (`chronology_entries` filtrados por `dossier_id`)
+3. Calcula lacunas e inconsistencias no frontend
+4. Disponibiliza dados para cada bloco
+
+### Geracao de CSV
+
+Funcao utilitaria pura (sem dependencias externas):
 
 ```text
-Estado adicional:
-- searchQuery: string
-- editingEntry: ChronologyEntry | null
-- entryToDelete: string | null
-
-Novo fluxo de eliminacao:
-1. Clicar Trash2 -> abre AlertDialog
-2. Confirmar -> executa handleDeleteEntry
-3. Cancelar -> fecha AlertDialog
-
-Fluxo de edicao:
-1. Clicar Edit -> setEditingEntry(entry)
-2. Preencher formData com dados da entrada
-3. Abrir Dialog
-4. Submit -> handleUpdateEntry (PUT em vez de INSERT)
+function downloadCSV(headers: string[], rows: string[][], filename: string)
+  - Converte para string CSV com separador ";"
+  - Cria Blob com BOM UTF-8 para compatibilidade com Excel
+  - Dispara download via link temporario
 ```
 
-### Relatorios - Graficos
+### Analise de Inconsistencias (Bloco 2)
 
-```text
-Dados para graficos:
-- statusDistribution: { name: string, value: number, fill: string }[]
-- categoryDistribution: { category: string, count: number }[]
+Verifica:
+- Entradas de cronologia sem `source_reference` (fonte nao indicada)
+- Documentos sem `document_date` (data em falta)
+- Entradas de cronologia com `event_date` posterior a documentos referenciados
+- Entradas sem `document_id` (sem ligacao a documento)
 
-Componentes recharts:
-- PieChart com Pie, Cell, Tooltip, Legend
-- BarChart com Bar, XAxis, YAxis, Tooltip
-```
+### Analise de Relacoes (Bloco 2)
 
-### Categorias de Dossies
+Calcula:
+- Total de entradas de cronologia
+- Entradas com `document_id` preenchido vs. vazio
+- Percentagem de cobertura documental
+- Lista de documentos nao referenciados em nenhuma entrada
 
-Baseado na memoria do projeto, as categorias sao:
-- Consumo
-- Telecomunicacoes
-- Transito
-- Fiscal
-- Trabalho
-- Outros
+### Componentes UI Utilizados
 
----
+Todos ja instalados, sem novas dependencias:
+- `Collapsible`, `CollapsibleTrigger`, `CollapsibleContent` (Radix)
+- `Card`, `CardHeader`, `CardContent`, `CardTitle`, `CardDescription`
+- `Button`, `Badge`, `Select`, `Separator`
+- Icones Lucide: `FileText`, `Clock`, `AlertTriangle`, `Download`, `ChevronDown`, `Link2`, `Activity`, `Table`
+
+### Impressao (Print Views)
+
+Os blocos 2 e 3 ficam ocultos na impressao (`print:hidden`). Apenas o conteudo do relatorio selecionado no Bloco 1 e impresso, usando a mesma estrategia `window.print()` + CSS `@media print` ja implementada.
+
+### Mobile-First
+
+- Cards do Bloco 1 empilham verticalmente em mobile (1 coluna)
+- Selector de dossie ocupa largura total em mobile
+- Blocos colapsaveis funcionam nativamente em touch
+- Botoes de exportacao com texto completo em desktop, so icone em mobile
 
 ## Sequencia de Implementacao
 
-1. **Cronologia - UX basico**
-   - Confirmacao de eliminacao com AlertDialog
-   - Pesquisa por texto
-
-2. **Cronologia - Edicao**
-   - Refatorar formulario para criar/editar
-   - Adicionar botao e logica de edicao
-
-3. **Relatorios - Navegacao e Filtros**
-   - Links clicaveis para dossies
-   - Filtro por categoria
-   - Ordenacao
-
-4. **Relatorios - Graficos**
-   - Componente ReportsCharts
-   - Integracao com recharts
-
-5. **Exportacao PDF**
-   - Vistas de impressao
-   - Botoes de exportacao
-
----
-
-## Dependencias
-
-- `recharts` - ja instalado (v2.15.4)
-- `@radix-ui/react-alert-dialog` - ja instalado
-- Nao sao necessarias novas dependencias
-
----
-
-## Mobile-First
-
-Todas as alteracoes respeitam a arquitetura mobile-first:
-- Graficos com ResponsiveContainer
-- Filtros empilhados verticalmente em mobile
-- Cards de cronologia responsivos
-- Vista de impressao otimizada para A4
+1. Criar utilitario `CsvExporter.tsx` (funcao pura, sem dependencias de UI)
+2. Criar `ReportBlock.tsx` (componente visual reutilizavel)
+3. Criar `DossierSelector.tsx` (selector com resumo)
+4. Criar componentes de analise (Gaps, Inconsistencies, Relations)
+5. Reescrever `Reports.tsx` com a nova estrutura em 3 blocos
+6. Atualizar `ReportsPrintView.tsx` para o novo formato do Bloco 1
