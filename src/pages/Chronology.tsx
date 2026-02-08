@@ -251,8 +251,135 @@ export default function Chronology() {
 
   return (
     <DashboardLayout>
-      {/* UI igual ao teu — não mexi sem necessidade */}
-      {/* … (restante JSX é idêntico ao que enviaste) */}
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="font-display text-2xl font-bold text-foreground lg:text-3xl">
+              Cronologia Factual
+            </h1>
+            <p className="mt-1 text-muted-foreground">
+              Timeline de eventos organizados por dossiê
+            </p>
+          </div>
+
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={handleExportPDF}>
+              <FileDown className="mr-2 h-4 w-4" />
+              Exportar PDF
+            </Button>
+
+            <Dialog open={isDialogOpen} onOpenChange={(open) => {
+              setIsDialogOpen(open);
+              if (!open) setEditingEntry(null);
+            }}>
+              <DialogTrigger asChild>
+                <Button size="sm">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Nova Entrada
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>{editingEntry ? 'Editar Entrada' : 'Nova Entrada'}</DialogTitle>
+                  <DialogDescription>
+                    {editingEntry ? 'Atualize os dados da entrada cronológica.' : 'Adicione um novo evento à cronologia.'}
+                  </DialogDescription>
+                </DialogHeader>
+                <ChronologyForm
+                  dossiers={dossiers}
+                  initialData={initialFormData}
+                  isSubmitting={isSubmitting}
+                  onSubmit={editingEntry ? handleUpdateEntry : handleCreateEntry}
+                  onCancel={() => {
+                    setIsDialogOpen(false);
+                    setEditingEntry(null);
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          </div>
+        </div>
+
+        {/* Filters */}
+        <div className="flex flex-col gap-3 sm:flex-row">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Pesquisar entradas..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+
+          <Select value={selectedDossier} onValueChange={setSelectedDossier}>
+            <SelectTrigger className="w-full sm:w-[200px]">
+              <SelectValue placeholder="Filtrar por dossiê" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os dossiês</SelectItem>
+              {dossiers.map(d => (
+                <SelectItem key={d.id} value={d.id}>{d.title}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Content */}
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : entries.length === 0 ? (
+          <Card>
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <Clock className="h-12 w-12 text-muted-foreground/50" />
+              <h3 className="mt-4 font-medium text-foreground">Sem entradas</h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Ainda não existem entradas cronológicas.
+              </p>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-8">
+            {years.map(year => (
+              <div key={year}>
+                <h2 className="mb-4 text-lg font-semibold text-foreground">{year}</h2>
+                <div className="relative space-y-4 pl-6 before:absolute before:left-2 before:top-0 before:h-full before:w-px before:bg-border">
+                  {entriesByYear[year].map(entry => (
+                    <ChronologyEntryCard
+                      key={entry.id}
+                      entry={entry}
+                      onEdit={() => {
+                        setEditingEntry(entry);
+                        setIsDialogOpen(true);
+                      }}
+                      onDelete={() => setEntryToDelete(entry.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Delete confirmation */}
+        <AlertDialog open={!!entryToDelete} onOpenChange={(open) => !open && setEntryToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Eliminar entrada?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta ação não pode ser revertida. A entrada será permanentemente eliminada.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteEntry}>Eliminar</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
     </DashboardLayout>
   );
 }

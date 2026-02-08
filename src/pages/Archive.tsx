@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/auth';
 import { DashboardLayout } from '@/components/layout/DashboardLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Archive as ArchiveIcon, Loader2, FolderOpen, FileText, Calendar, Tag } from 'lucide-react';
+import { Archive as ArchiveIcon, Loader2, FolderOpen, FileText, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
 interface ArchivedDossier {
@@ -12,10 +12,9 @@ interface ArchivedDossier {
   title: string;
   client_name: string | null;
   reference_code: string | null;
+  category: string | null;
   updated_at: string;
   document_count: number;
-  type?: string;
-  categories?: string[];
 }
 
 export default function Archive() {
@@ -35,34 +34,30 @@ export default function Archive() {
   async function fetchArchivedDossiers() {
     setLoading(true);
     try {
-      // Fetch dossiers arquivados
+      // Fetch archived dossiers
       const { data: dossiersData, error: dossiersError } = await supabase
         .from('dossiers')
-        .select('id, title, client_name, reference_code, updated_at, type, categories')
+        .select('id, title, client_name, reference_code, updated_at, category')
         .eq('user_id', user!.id)
         .eq('status', 'arquivado')
         .order('updated_at', { ascending: false });
 
       if (dossiersError) throw dossiersError;
 
-      // Fetch document counts grouped by dossier
-      const { data: documentsCountData, error: documentsError } = await supabase
-        .from('documents')
-        .select('dossier_id', { count: 'exact', head: false })
-        .eq('user_id', user!.id)
-        .group('dossier_id');
+      // Fetch document counts per dossier individually
+      const archiveData: ArchivedDossier[] = [];
+      for (const d of dossiersData || []) {
+        const { count } = await supabase
+          .from('documents')
+          .select('id', { count: 'exact', head: true })
+          .eq('dossier_id', d.id)
+          .eq('user_id', user!.id);
 
-      if (documentsError) throw documentsError;
-
-      const documentsCountMap = new Map<string, number>();
-      documentsCountData?.forEach((doc: any) => {
-        documentsCountMap.set(doc.dossier_id, doc.count ?? 0);
-      });
-
-      const archiveData: ArchivedDossier[] = (dossiersData || []).map(d => ({
-        ...d,
-        document_count: documentsCountMap.get(d.id) || 0,
-      }));
+        archiveData.push({
+          ...d,
+          document_count: count ?? 0,
+        });
+      }
 
       setDossiers(archiveData);
     } catch (error) {
@@ -122,7 +117,7 @@ export default function Archive() {
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {dossiers.map(dossier => (
                 <Link key={dossier.id} to={`/dashboard/dossiers/${dossier.id}`}>
-                  <Card className="h-full transition-shadow hover:shadow-soft-lg">
+                  <Card className="h-full transition-shadow hover:shadow-lg">
                     <CardHeader className="pb-2">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex h-8 w-8 items-center justify-center rounded bg-secondary">
@@ -147,21 +142,10 @@ export default function Archive() {
                         <p className="text-sm text-muted-foreground">{dossier.client_name}</p>
                       )}
 
-                      {dossier.type && (
-                        <div className="flex items-center gap-1 text-xs text-muted-foreground mt-1">
-                          <Tag className="h-3 w-3" />
-                          {dossier.type}
-                        </div>
-                      )}
-
-                      {dossier.categories && dossier.categories.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {dossier.categories.map((cat, idx) => (
-                            <Badge key={idx} variant="outline" className="text-[0.65rem]">
-                              {cat}
-                            </Badge>
-                          ))}
-                        </div>
+                      {dossier.category && (
+                        <Badge variant="outline" className="text-[0.65rem] mt-1">
+                          {dossier.category}
+                        </Badge>
                       )}
 
                       <div className="mt-3 flex flex-wrap gap-3 text-xs text-muted-foreground">
