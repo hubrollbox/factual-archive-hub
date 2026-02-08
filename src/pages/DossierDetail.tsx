@@ -16,7 +16,6 @@ import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { format } from 'date-fns';
 import { pt } from 'date-fns/locale';
-import { useReactToPrint } from 'react-to-print';
 
 /* ===================== TIPOS ===================== */
 
@@ -32,15 +31,15 @@ interface Dossier {
   created_at: string;
 }
 
-interface DocumentISO {
+interface DocumentRow {
   id: string;
-  author: string;
   title: string;
-  document_type: 'oficio' | 'email' | 'contrato' | 'fatura' | 'despacho' | 'relatorio' | 'outro';
-  document_date: string;
-  place: string | null;
-  reference_code: string | null;
-  notes: string | null;
+  document_type: 'pdf' | 'imagem' | 'texto' | 'outro';
+  document_date: string | null;
+  description: string | null;
+  entity: string | null;
+  file_name: string | null;
+  file_path: string | null;
   created_at: string;
 }
 
@@ -53,44 +52,39 @@ const statusLabels: Record<DossierStatus, string> = {
   arquivado: 'Arquivado',
 };
 
+const docTypeLabels: Record<string, string> = {
+  pdf: 'PDF',
+  imagem: 'Imagem',
+  texto: 'Texto',
+  outro: 'Outro',
+};
+
 /* ===================== ZOD SCHEMA DOCUMENTO ===================== */
 
 const docSchema = z.object({
-  author: z.string().min(2, 'Autor/Entidade obrigatório'),
   title: z.string().min(3, 'Título obrigatório'),
-  document_type: z.enum([
-    'oficio',
-    'email',
-    'contrato',
-    'fatura',
-    'despacho',
-    'relatorio',
-    'outro',
-  ]),
-  document_date: z
-    .string()
-    .refine(d => new Date(d) <= new Date(), 'Data não pode ser futura'),
-  place: z.string().optional(),
-  reference_code: z.string().optional(),
-  notes: z.string().optional(),
+  document_type: z.enum(['pdf', 'imagem', 'texto', 'outro']),
+  document_date: z.string().optional(),
+  entity: z.string().optional(),
+  description: z.string().optional(),
 });
 
 type DocForm = z.infer<typeof docSchema>;
 
-/* ===================== ISO 690 ===================== */
+/* ===================== FORMATAÇÃO ===================== */
 
-function formatISO690(doc: DocumentISO) {
+function formatDocReference(doc: DocumentRow) {
   const parts: string[] = [];
 
-  parts.push(doc.author.toUpperCase());
+  if (doc.entity) parts.push(doc.entity.toUpperCase());
   parts.push(`${doc.title}.`);
-  parts.push(`[${doc.document_type}].`);
+  parts.push(`[${docTypeLabels[doc.document_type] || doc.document_type}].`);
 
-  if (doc.place) parts.push(`${doc.place},`);
-  parts.push(`${new Date(doc.document_date).getFullYear()}.`);
+  if (doc.document_date) {
+    parts.push(`${new Date(doc.document_date).getFullYear()}.`);
+  }
 
-  if (doc.reference_code) parts.push(`Ref. ${doc.reference_code}.`);
-  if (doc.notes) parts.push(doc.notes);
+  if (doc.description) parts.push(doc.description);
 
   return parts.join(' ');
 }
@@ -99,7 +93,7 @@ function formatISO690(doc: DocumentISO) {
 
 const DossierReportView = forwardRef<
   HTMLDivElement,
-  { dossier: Dossier; documents: DocumentISO[]; lacunas: string[] }
+  { dossier: Dossier; documents: DocumentRow[]; lacunas: string[] }
 >(({ dossier, documents, lacunas }, ref) => (
   <div ref={ref} className="p-6 text-sm">
     <h1 className="text-xl font-bold mb-2">Relatório Factual</h1>
@@ -114,10 +108,10 @@ const DossierReportView = forwardRef<
     <h2 className="mt-6 font-semibold">Referências Documentais</h2>
     <ol className="list-decimal ml-6">
       {documents
-        .sort((a, b) => a.document_date.localeCompare(b.document_date))
+        .sort((a, b) => (a.document_date ?? '').localeCompare(b.document_date ?? ''))
         .map(d => (
           <li key={d.id} className="mb-1">
-            {formatISO690(d)}
+            {formatDocReference(d)}
           </li>
         ))}
     </ol>
@@ -144,7 +138,7 @@ export default function DossierDetail() {
   const { toast } = useToast();
 
   const [dossier, setDossier] = useState<Dossier | null>(null);
-  const [documents, setDocuments] = useState<DocumentISO[]>([]);
+  const [documents, setDocuments] = useState<DocumentRow[]>([]);
   const [lacunas, setLacunas] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -154,21 +148,19 @@ export default function DossierDetail() {
   const docForm = useForm<DocForm>({
     resolver: zodResolver(docSchema),
     defaultValues: {
-      author: '',
       title: '',
       document_type: 'outro',
       document_date: '',
-      place: '',
-      reference_code: '',
-      notes: '',
+      entity: '',
+      description: '',
     },
   });
 
   const { register, handleSubmit, formState: { errors } } = docForm;
 
-  const handlePrintReport = useReactToPrint({
-    content: () => reportRef.current,
-  });
+  function handlePrintReport() {
+    window.print();
+  }
 
   useEffect(() => {
     if (!user || !id) return;
@@ -191,7 +183,7 @@ export default function DossierDetail() {
       if (error) throw error;
 
       setDossier(data);
-      setDocuments(data.documents ?? []);
+      setDocuments((data.documents ?? []) as DocumentRow[]);
 
       const gaps: string[] = [];
       if (!data.documents?.length) gaps.push('Ausência de documentos.');
@@ -208,15 +200,13 @@ export default function DossierDetail() {
 
     try {
       const { error } = await supabase.from('documents').insert({
-        dossier_id: id,
+        dossier_id: id!,
         user_id: user!.id,
-        author: data.author,
         title: data.title,
         document_type: data.document_type,
-        document_date: data.document_date,
-        place: data.place || null,
-        reference_code: data.reference_code || null,
-        notes: data.notes || null,
+        document_date: data.document_date || null,
+        entity: data.entity || null,
+        description: data.description || null,
       });
 
       if (error) throw error;
@@ -254,48 +244,38 @@ export default function DossierDetail() {
         className="space-y-4 mt-4"
       >
         <div>
-          <Input {...register('author')} placeholder="Autor / Entidade" />
-          {errors.author && <p className="text-red-600 text-sm mt-1">{errors.author.message}</p>}
-        </div>
-
-        <div>
           <Input {...register('title')} placeholder="Título do Documento" />
-          {errors.title && <p className="text-red-600 text-sm mt-1">{errors.title.message}</p>}
+          {errors.title && <p className="text-destructive text-sm mt-1">{errors.title.message}</p>}
         </div>
 
         <div>
-          <Select {...register('document_type')}>
+          <Select
+            defaultValue="outro"
+            onValueChange={(val) => docForm.setValue('document_type', val as DocForm['document_type'])}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Tipo de Documento" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="oficio">Ofício</SelectItem>
-              <SelectItem value="email">Email</SelectItem>
-              <SelectItem value="contrato">Contrato</SelectItem>
-              <SelectItem value="fatura">Fatura</SelectItem>
-              <SelectItem value="despacho">Despacho</SelectItem>
-              <SelectItem value="relatorio">Relatório</SelectItem>
+              <SelectItem value="pdf">PDF</SelectItem>
+              <SelectItem value="imagem">Imagem</SelectItem>
+              <SelectItem value="texto">Texto</SelectItem>
               <SelectItem value="outro">Outro</SelectItem>
             </SelectContent>
           </Select>
-          {errors.document_type && <p className="text-red-600 text-sm mt-1">{errors.document_type.message}</p>}
+          {errors.document_type && <p className="text-destructive text-sm mt-1">{errors.document_type.message}</p>}
         </div>
 
         <div>
           <Input type="date" {...register('document_date')} />
-          {errors.document_date && <p className="text-red-600 text-sm mt-1">{errors.document_date.message}</p>}
         </div>
 
         <div>
-          <Input {...register('place')} placeholder="Local (opcional)" />
+          <Input {...register('entity')} placeholder="Entidade (opcional)" />
         </div>
 
         <div>
-          <Input {...register('reference_code')} placeholder="Referência (opcional)" />
-        </div>
-
-        <div>
-          <Textarea {...register('notes')} placeholder="Notas (opcional)" />
+          <Textarea {...register('description')} placeholder="Descrição (opcional)" />
         </div>
 
         <Button type="submit" disabled={dossier.status === 'arquivado'}>Adicionar Documento</Button>
@@ -305,12 +285,12 @@ export default function DossierDetail() {
         <h2 className="font-semibold mb-2">Documentos Existentes</h2>
         <ol className="list-decimal ml-6">
           {documents.map(d => (
-            <li key={d.id}>{formatISO690(d)}</li>
+            <li key={d.id}>{formatDocReference(d)}</li>
           ))}
         </ol>
       </div>
 
-      <div className="hidden">
+      <div className="hidden print:block">
         <DossierReportView
           ref={reportRef}
           dossier={dossier}
