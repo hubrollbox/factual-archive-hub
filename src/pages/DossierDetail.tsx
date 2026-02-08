@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { ArrowLeft, FileText, Loader2, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, FileText, Loader2, AlertTriangle, RefreshCw } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -158,8 +158,34 @@ export default function DossierDetail() {
 
   const { register, handleSubmit, formState: { errors } } = docForm;
 
+  const [statusChanging, setStatusChanging] = useState(false);
+
   function handlePrintReport() {
     window.print();
+  }
+
+  async function handleStatusChange(newStatus: DossierStatus) {
+    if (!dossier || newStatus === dossier.status) return;
+    setStatusChanging(true);
+    try {
+      const { error } = await supabase
+        .from('dossiers')
+        .update({ status: newStatus })
+        .eq('id', id!)
+        .eq('user_id', user!.id);
+
+      if (error) throw error;
+
+      setDossier({ ...dossier, status: newStatus });
+      toast({
+        title: 'Estado atualizado',
+        description: `Dossiê alterado para "${statusLabels[newStatus]}"`,
+      });
+    } catch {
+      toast({ variant: 'destructive', title: 'Erro ao alterar estado' });
+    } finally {
+      setStatusChanging(false);
+    }
   }
 
   useEffect(() => {
@@ -225,15 +251,34 @@ export default function DossierDetail() {
 
   return (
     <DashboardLayout>
-      <div className="flex items-center gap-4 mb-4">
-        <Button variant="ghost" onClick={() => navigate('/dashboard/dossiers')}>
-          <ArrowLeft />
+      <div className="flex flex-wrap items-center gap-3 mb-4">
+        <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard/dossiers')}>
+          <ArrowLeft className="h-4 w-4" />
         </Button>
 
         <h1 className="text-xl font-bold">{dossier.title}</h1>
-        <Badge>{statusLabels[dossier.status]}</Badge>
 
-        <Button onClick={handlePrintReport}>
+        <Select
+          value={dossier.status}
+          onValueChange={(val) => handleStatusChange(val as DossierStatus)}
+          disabled={statusChanging}
+        >
+          <SelectTrigger className="w-[160px] h-8 text-xs">
+            {statusChanging ? (
+              <RefreshCw className="h-3 w-3 animate-spin" />
+            ) : (
+              <SelectValue />
+            )}
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="em_analise">Em Análise</SelectItem>
+            <SelectItem value="pendente">Pendente</SelectItem>
+            <SelectItem value="completo">Completo</SelectItem>
+            <SelectItem value="arquivado">Arquivado</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Button onClick={handlePrintReport} variant="outline" size="sm">
           <FileText className="mr-2 h-4 w-4" />
           Relatório Final
         </Button>
